@@ -1,0 +1,264 @@
+package com.codegym;
+
+import java.io.IOException;
+import java.sql.CallableStatement;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+import javax.servlet.RequestDispatcher;
+import javax.servlet.ServletException;
+import javax.servlet.annotation.WebServlet;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+public class MainApp {
+
+    /* =========================================================================
+     * BƯỚC 1: SCRIPT SQL TẠO STORED PROCEDURES
+     * =========================================================================
+     * Thực thi các lệnh SQL sau trong MySQL Client / MySQL Workbench:
+     *
+     * USE demo;
+     *
+     * DELIMITER $$
+     * CREATE PROCEDURE get_user_by_id(IN user_id INT)
+     * BEGIN
+     *     SELECT users.name, users.email, users.country
+     *     FROM users
+     *     WHERE users.id = user_id;
+     * END$$
+     * DELIMITER ;
+     *
+     * DELIMITER $$
+     * CREATE PROCEDURE insert_user(
+     *     IN user_name VARCHAR(50),
+     *     IN user_email VARCHAR(50),
+     *     IN user_country VARCHAR(50)
+     * )
+     * BEGIN
+     *     INSERT INTO users(name, email, country)
+     *     VALUES(user_name, user_email, user_country);
+     * END$$
+     * DELIMITER ;
+     * =========================================================================
+     */
+
+    // =========================================================================
+    // MODEL CLASS: User
+    // =========================================================================
+    public static class User {
+        private int id;
+        private String name;
+        private String email;
+        private String country;
+
+        public User() {}
+
+        public User(String name, String email, String country) {
+            this.name = name;
+            this.email = email;
+            this.country = country;
+        }
+
+        public User(int id, String name, String email, String country) {
+            this.id = id;
+            this.name = name;
+            this.email = email;
+            this.country = country;
+        }
+
+        public int getId() { return id; }
+        public void setId(int id) { this.id = id; }
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+
+        public String getCountry() { return country; }
+        public void setCountry(String country) { this.country = country; }
+    }
+
+    // =========================================================================
+    // DAO INTERFACE: IUserDAO
+    // =========================================================================
+    public interface IUserDAO {
+        void insertUser(User user) throws SQLException;
+        User selectUser(int id);
+        List<User> selectAllUsers();
+        boolean deleteUser(int id) throws SQLException;
+        boolean updateUser(User user) throws SQLException;
+
+        // Các phương thức gọi Stored Procedure
+        User getUserById(int id);
+        void insertUserStore(User user) throws SQLException;
+    }
+
+    // =========================================================================
+    // DAO IMPLEMENTATION: UserDAO
+    // =========================================================================
+    public static class UserDAO implements IUserDAO {
+        private String jdbcURL = "jdbc:mysql://localhost:3306/demo?useSSL=false";
+        private String jdbcUsername = "root";
+        private String jdbcPassword = "123456";
+
+        protected Connection getConnection() {
+            Connection connection = null;
+            try {
+                Class.forName("com.mysql.cj.jdbc.Driver");
+                connection = DriverManager.getConnection(jdbcURL, jdbcUsername, jdbcPassword);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+            return connection;
+        }
+
+        @Override
+        public void insertUser(User user) throws SQLException {
+            // Logic PreparedStatement cũ
+        }
+
+        @Override
+        public User selectUser(int id) {
+            return null;
+        }
+
+        @Override
+        public List<User> selectAllUsers() {
+            return new ArrayList<>();
+        }
+
+        @Override
+        public boolean deleteUser(int id) throws SQLException {
+            return false;
+        }
+
+        @Override
+        public boolean updateUser(User user) throws SQLException {
+            return false;
+        }
+
+        // Triển khai CallableStatement gọi Stored Procedure: get_user_by_id
+        @Override
+        public User getUserById(int id) {
+            User user = null;
+            String query = "{CALL get_user_by_id(?)}";
+
+            try (Connection connection = getConnection();
+                 CallableStatement callableStatement = connection.prepareCall(query)) {
+                
+                callableStatement.setInt(1, id);
+                ResultSet rs = callableStatement.executeQuery();
+
+                while (rs.next()) {
+                    String name = rs.getString("name");
+                    String email = rs.getString("email");
+                    String country = rs.getString("country");
+                    user = new User(id, name, email, country);
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+            return user;
+        }
+
+        // Triển khai CallableStatement gọi Stored Procedure: insert_user
+        @Override
+        public void insertUserStore(User user) throws SQLException {
+            String query = "{CALL insert_user(?, ?, ?)}";
+
+            try (Connection connection = getConnection();
+                 CallableStatement callableStatement = connection.prepareCall(query)) {
+                
+                callableStatement.setString(1, user.getName());
+                callableStatement.setString(2, user.getEmail());
+                callableStatement.setString(3, user.getCountry());
+                System.out.println(callableStatement);
+                callableStatement.executeUpdate();
+            }
+        }
+    }
+
+    // =========================================================================
+    // CONTROLLER: UserServlet
+    // =========================================================================
+    @WebServlet(name = "UserServlet", urlPatterns = "/users")
+    public static class UserServlet extends HttpServlet {
+        private static final long serialVersionUID = 1L;
+        private IUserDAO userDAO;
+
+        public void init() {
+            userDAO = new UserDAO();
+        }
+
+        protected void doPost(HttpServletRequest request, HttpServletResponse response)
+                throws ServletException, IOException {
+            String action = request.getParameter("action");
+            if (action == null) {
+                action = "";
+            }
+            try {
+                switch (action) {
+                    case "create":
+                        insertUser(request, response);
+                        break;
+                }
+            } catch (SQLException ex) {
+                throw new ServletException(ex);
+            }
+        }
+
+        protected void doGet(HttpServletRequest request, HttpServletResponse response)
+                throws ServletException, IOException {
+            String action = request.getParameter("action");
+            if (action == null) {
+                action = "";
+            }
+
+            try {
+                switch (action) {
+                    case "edit":
+                        showEditForm(request, response);
+                        break;
+                    default:
+                        // Default list view
+                        break;
+                }
+            } catch (SQLException ex) {
+                throw new ServletException(ex);
+            }
+        }
+
+        // Hiển thị form chỉnh sửa sử dụng Stored Procedure
+        private void showEditForm(HttpServletRequest request, HttpServletResponse response)
+                throws SQLException, ServletException, IOException {
+            int id = Integer.parseInt(request.getParameter("id"));
+            User existingUser = userDAO.getUserById(id);
+            RequestDispatcher dispatcher = request.getRequestDispatcher("user/edit.jsp");
+            request.setAttribute("user", existingUser);
+            dispatcher.forward(request, response);
+        }
+
+        // Thêm người dùng mới sử dụng Stored Procedure
+        private void insertUser(HttpServletRequest request, HttpServletResponse response)
+                throws SQLException, IOException, ServletException {
+            String name = request.getParameter("name");
+            String email = request.getParameter("email");
+            String country = request.getParameter("country");
+            User newUser = new User(name, email, country);
+            
+            userDAO.insertUserStore(newUser);
+            
+            RequestDispatcher dispatcher = request.getRequestDispatcher("user/create.jsp");
+            request.setAttribute("message", "Đã thêm mới User thành công!");
+            dispatcher.forward(request, response);
+        }
+    }
+}
